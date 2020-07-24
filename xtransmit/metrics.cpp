@@ -91,7 +91,8 @@ std:: string validator::stats()
 	ss << "us. Jitter: " << m_jitter.jitter() << "us. ";
 	const auto stats = m_reorder.get_stats();
 	ss << "Pkts: rcvd " << stats.pkts_processed << ", reordered " << stats.pkts_reordered;
-	ss << ", lost " << stats.pkts_lost;
+	ss << " (dist " << stats.reorder_dist;
+	ss << "), lost " << stats.pkts_lost;
 	return ss.str();
 }
 
