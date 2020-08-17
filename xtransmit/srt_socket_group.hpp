@@ -19,23 +19,24 @@
 namespace xtransmit {
 	namespace socket {
 
-#if 0
 		class srt_group
 			: public std::enable_shared_from_this<srt_group>
 			, public isocket
 		{
 			using string = std::string;
-			using shared_srt = std::shared_ptr<srt_group>;
+			using shared_srt_group = std::shared_ptr<srt_group>;
 
 		public:
-			explicit srt_group(const std::vector<UriParser&>& src_uri);
+			explicit srt_group(const std::vector<UriParser>& src_uri);
+
+			srt_group(srt_group& group, int group_id);
 
 			virtual ~srt_group();
 
 
 		public:
-			shared_srt				connect();
-			shared_srt				accept();
+			shared_srt_group	connect();
+			shared_srt_group	accept();
 
 			/**
 			 * Start listening on the incomming connection requests.
@@ -50,13 +51,9 @@ namespace xtransmit {
 			void check_options_exist() const;
 			int  configure_pre(SRTSOCKET sock);
 			int  configure_post(SRTSOCKET sock);
-			void handle_hosts();
-			void create_listeners(const std::vector<const UriParser&>& src_uri);
+			void create_listeners(const std::vector<UriParser>& src_uri);
 
 		public:
-			std::future<shared_srt>  async_read(std::vector<char>& buffer);
-			void async_write();
-
 			/**
 			 * @returns The number of bytes received.
 			 *
@@ -95,12 +92,12 @@ namespace xtransmit {
 			int m_epoll_io = -1;
 
 			connection_mode m_mode = FAILURE;
-			bool m_blocking_mode = false;
+			bool m_blocking_mode = true;
 			string m_host;
 			int m_port = -1;
 			std::map<string, string> m_options; // All other options, as provided in the URI
 		};
-#endif
+
 	} // namespace socket
 } // namespace xtransmit
 

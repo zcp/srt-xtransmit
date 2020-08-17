@@ -13,6 +13,7 @@
 // xtransmit
 #include "socket_stats.hpp"
 #include "srt_socket.hpp"
+#include "srt_socket_group.hpp"
 #include "udp_socket.hpp"
 #include "receive.hpp"
 #include "metrics.hpp"
@@ -146,7 +147,17 @@ void xtransmit::receive::run(const string &src_url, const config &cfg, const ato
 			}
 			else
 			{
-				throw socket::exception("Input groups are not yet implemented");
+				vector<UriParser> urls;
+				urls.push_back(src_url);
+				for (auto u : cfg.inputs)
+					urls.push_back(u);
+
+				socket = make_shared<socket::srt_group>(urls);
+				socket::srt_group* s = static_cast<socket::srt_group*>(socket.get());
+				const bool  accept = s->mode() == socket::srt::LISTENER;
+				if (accept)
+					s->listen();
+				connection = accept ? s->accept() : s->connect();
 			}
 
 			if (stats)

@@ -15,18 +15,15 @@
 
 using namespace std;
 using namespace xtransmit;
-//using shared_srt_group = shared_ptr<socket::srt_group>;
+using shared_srt_group = shared_ptr<socket::srt_group>;
 
 
 #define LOG_SOCK_SRT "SOCKET::SRT_GROUP "
 
-#if 0
 
-socket::srt_group::srt_group(const vector<UriParser&>& src_uri)
+socket::srt_group::srt_group(const vector<UriParser>& src_uri)
 {
-	m_bind_socket = srt_create_socket();
-	if (m_bind_socket == SRT_INVALID_SOCK)
-		throw socket::exception(srt_getlasterror_str());
+	m_bind_socket = SRT_INVALID_SOCK;
 
 	if (m_options.count("blocking"))
 	{
@@ -36,6 +33,7 @@ socket::srt_group::srt_group(const vector<UriParser&>& src_uri)
 
 	if (!m_blocking_mode)
 	{
+		throw socket::exception("Only blocking mode is supported at the moment");
 		m_epoll_connect = srt_epoll_create();
 		if (m_epoll_connect == -1)
 			throw socket::exception(srt_getlasterror_str());
@@ -52,11 +50,13 @@ socket::srt_group::srt_group(const vector<UriParser&>& src_uri)
 
 	check_options_exist();
 
-	if (SRT_SUCCESS != configure_pre(m_bind_socket))
-		throw socket::exception(srt_getlasterror_str());
+	create_listeners(src_uri);
+}
 
-	// Do binding after PRE options are configured in the above call.
-	handle_hosts();
+socket::srt_group::srt_group(srt_group& group, int group_id)
+{
+	m_bind_socket = group_id;
+
 }
 
 socket::srt_group::~srt_group()
@@ -72,7 +72,7 @@ socket::srt_group::~srt_group()
 	srt_close(m_bind_socket);
 }
 
-void socket::srt_group::create_listeners(const vector<const UriParser&>& src_uri)
+void socket::srt_group::create_listeners(const vector<UriParser>& src_uri)
 {
 	// Create listeners according to the parameters
 	for (size_t i = 0; i < src_uri.size(); ++i)
@@ -86,6 +86,10 @@ void socket::srt_group::create_listeners(const vector<const UriParser&>& src_uri
 		srt_setsockflag(s, SRTO_GROUPCONNECT, &gcon, sizeof gcon);
 
 		srt_bind(s, sa.get(), sa.size());
+
+		if (SRT_SUCCESS != configure_pre(s))
+			throw socket::exception(srt_getlasterror_str());
+
 		srt_listen(s, 5);
 
 		m_listeners.push_back(s);
@@ -94,18 +98,18 @@ void socket::srt_group::create_listeners(const vector<const UriParser&>& src_uri
 
 void socket::srt_group::listen()
 {
-	int         num_clients = 2;
-	int res = srt_listen(m_bind_socket, num_clients);
-	if (res == SRT_ERROR)
-	{
-		srt_close(m_bind_socket);
-		raise_exception("listen");
-	}
+	//int         num_clients = 2;
+	//int res = srt_listen(m_bind_socket, num_clients);
+	//if (res == SRT_ERROR)
+	//{
+	//	srt_close(m_bind_socket);
+	//	raise_exception("listen");
+	//}
 
-	spdlog::debug(LOG_SOCK_SRT "0x{:X} (srt://{}:{:d}) Listening", m_bind_socket, m_host, m_port);
-	res = configure_post(m_bind_socket);
-	if (res == SRT_ERROR)
-		raise_exception("listen::configure_post");
+	//spdlog::debug(LOG_SOCK_SRT "0x{:X} (srt://{}:{:d}) Listening", m_bind_socket, m_host, m_port);
+	//res = configure_post(m_bind_socket);
+	//if (res == SRT_ERROR)
+	//	raise_exception("listen::configure_post");
 }
 
 shared_srt_group socket::srt_group::accept()
@@ -125,26 +129,16 @@ shared_srt_group socket::srt_group::accept()
 		raise_exception("accept_bond failed with {}", srt_getlasterror_str());
 	}
 
-	sockaddr_in scl;
-	int         sclen = sizeof scl;
-	const SRTSOCKET sock = srt_accept(m_bind_socket, (sockaddr*)&scl, &sclen);
-	if (sock == SRT_INVALID_SOCK)
-	{
-		raise_exception("accept");
-	}
-
 	// we do one client connection at a time,
 	// so close the listener.
 	// srt_close(m_bindsock);
 	// m_bindsock = SRT_INVALID_SOCK;
 
-	spdlog::debug(LOG_SOCK_SRT "Accepted connection 0x{:X}", sock);
-
-	const int res = configure_post(sock);
+	const int res = configure_post(conngrp);
 	if (res == SRT_ERROR)
 		raise_exception("accept::configure_post");
 
-	return make_shared<srt_group>(sock, m_blocking_mode);
+	return make_shared<srt_group>(*this, conngrp);
 }
 
 void socket::srt_group::raise_exception(const string&& place) const
@@ -163,6 +157,7 @@ void socket::srt_group::raise_exception(const string&& place, const string&& rea
 
 shared_srt_group socket::srt_group::connect()
 {
+#if 0
 	sockaddr_any sa;
 	try
 	{
@@ -217,7 +212,7 @@ shared_srt_group socket::srt_group::connect()
 		if (res == SRT_ERROR)
 			raise_exception("connect::onfigure_post");
 	}
-
+#endif
 	return shared_from_this();
 }
 
@@ -314,62 +309,6 @@ int socket::srt_group::configure_post(SRTSOCKET sock)
 	return 0;
 }
 
-void socket::srt_group::handle_hosts()
-{
-	const auto bind_me = [&](const sockaddr* sa) {
-		const int       bind_res = srt_bind(m_bind_socket, sa, sizeof * sa);
-		if (bind_res < 0)
-		{
-			srt_close(m_bind_socket);
-			throw socket::exception("SRT binding has failed");
-		}
-	};
-
-	bool ip_bonded = false;
-	if (m_options.count("bind"))
-	{
-		string bindipport = m_options.at("bind");
-		transform(bindipport.begin(), bindipport.end(), bindipport.begin(), [](char c) { return tolower(c); });
-		const size_t idx = bindipport.find(":");
-		const string bindip = bindipport.substr(0, idx);
-		const int bindport = idx != string::npos
-			? stoi(bindipport.substr(idx + 1, bindipport.size() - (idx + 1)))
-			: m_port;
-		m_options.erase("bind");
-
-		sockaddr_any sa_bind;
-		try
-		{
-			sa_bind = CreateAddr(bindip, bindport);
-		}
-		catch (const std::invalid_argument&)
-		{
-			throw socket::exception("create_addr_inet failed");
-		}
-
-		bind_me(reinterpret_cast<const sockaddr*>(&sa_bind));
-		ip_bonded = true;
-
-		spdlog::info(LOG_SOCK_SRT "srt://{}:{:d}: bound to '{}:{}'.",
-			m_host, m_port, bindip, bindport);
-	}
-
-	if (m_host == "" && !ip_bonded)
-	{
-		// bind listener
-		sockaddr_any sa;
-		try
-		{
-			sa = CreateAddr(m_host, m_port);
-		}
-		catch (const std::invalid_argument & e)
-		{
-			raise_exception("listen::create_addr", e.what());
-		}
-		bind_me(reinterpret_cast<const sockaddr*>(&sa));
-	}
-}
-
 size_t socket::srt_group::read(const mutable_buffer & buffer, int timeout_ms)
 {
 	if (!m_blocking_mode)
@@ -438,7 +377,7 @@ int socket::srt_group::write(const const_buffer & buffer, int timeout_ms)
 	return res;
 }
 
-socket::srt_group::connection_mode socket::srt::mode() const
+socket::srt_group::connection_mode socket::srt_group::mode() const
 {
 	return m_mode;
 }
@@ -556,4 +495,3 @@ const string socket::srt_group::statistics_csv(bool print_header)
 	return stats_to_csv(m_bind_socket, stats, print_header);
 }
 
-#endif
