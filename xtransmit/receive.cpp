@@ -135,7 +135,7 @@ void xtransmit::receive::run(const string &src_url, const config &cfg, const ato
 			{
 				connection = make_shared<socket::udp>(uri);
 			}
-			else
+			else if (cfg.inputs.empty())
 			{
 				socket = make_shared<socket::srt>(uri);
 				socket::srt* s = static_cast<socket::srt*>(socket.get());
@@ -143,6 +143,10 @@ void xtransmit::receive::run(const string &src_url, const config &cfg, const ato
 				if (accept)
 					s->listen();
 				connection = accept ? s->accept() : s->connect();
+			}
+			else
+			{
+				throw socket::exception("Input groups are not yet implemented");
 			}
 
 			if (stats)
@@ -172,6 +176,7 @@ CLI::App* xtransmit::receive::add_subcommand(CLI::App& app, config& cfg, string&
 	sc_receive->add_flag("--reconnect", cfg.reconnect, "Reconnect automatically");
 	sc_receive->add_flag("--enable-metrics", cfg.enable_metrics, "Enable checking metrics: jitter, latency, etc.");
 	sc_receive->add_flag("--twoway", cfg.send_reply, "Both send and receive data");
+	sc_receive->add_option("--input-group", cfg.inputs, "More input group URLs for SRT bonding");
 
 	return sc_receive;
 }
